@@ -6,7 +6,7 @@ sys.path.append("../tools/")
 import pandas as pd 
 import numpy as np 
 import matplotlib.pyplot as plt
-%matplotlib inline
+#%matplotlib inline
 
 
 from tester import dump_classifier_and_data
@@ -21,7 +21,7 @@ from tester import *
 ### The initial feature_list contians all features, final feature_list will      ###
 ### be updated after feature selection                                           ###
 ####################################################################################
-features_list = ['poi','salary', 'deferral_payments',\
+full_features_list = ['poi','salary', 'deferral_payments',\
                  'total_payments', 'loan_advances', 'bonus',\
                  'restricted_stock_deferred', 'deferred_income',\
                  'total_stock_value', 'expenses', 'exercised_stock_options',\
@@ -37,7 +37,7 @@ with open("final_project_dataset.pkl", "r") as data_file:
 ############################# Data Overview ##################################
     
 print 'The number of observations:',len(data_dict), '\n' \
-'The number of features:',  len(features_list)
+'The number of features:',  len(full_features_list)
 
 # convert the dictionary to pandas dataframe for data wrangling and cleaning
 
@@ -45,9 +45,10 @@ data_df=pd.DataFrame.from_dict(data_dict,orient='index', dtype='float')
 data_df[['poi']]=data_df[['poi']].astype('bool')
 data_df=data_df.replace('NaN', np.nan) 
 
-# missing values
-print 'Summary of missing values:'
-data_df.isnull().sum()
+# missing values - features
+data_df.isnull().sum(axis=0).sort_values(ascending = False)[0:10]
+# missing values - observations
+data_df.isnull().sum(axis=1).sort_values(ascending = False)[0:10]
 
 # count labels frequencty
 
@@ -60,38 +61,47 @@ data_df['poi'].value_counts()
 
 ## Visualize outliers in box-plot
 data_df[['salary', 'deferral_payments','total_payments',\
-         'bonus','total_stock_value', 'exercised_stock_options',]].plot.box()
+         'bonus','total_stock_value', 'exercised_stock_options',\
+        'long_term_incentive', 'restricted_stock', 'director_fees',]].plot.box()
 
 ## identify observations that contains outlier 
-data_df[['total_stock_value', 'total_payments']].describe()
-data_df[data_df['total_stock_value']>200000000]
 
-# Remove the row with errors
-data_df.drop(['TOTAL'], inplace=True)
+data_df[['total_stock_value', 'total_payments', 'restricted_stock']].describe()
+### Check obvious outlier in 'total_stock_values'
+### Found observation named 'TOTAL' 
+
+data_df[data_df['total_stock_value']>200000000]
 
 # Check the abnormal observations has negative total stock value
 data_df[data_df['total_stock_value']<0]
 
-# plot the cleaned data 
-data_df[['salary', 'deferral_payments','total_payments',\
-         'bonus','total_stock_value', 'exercised_stock_options',\
-        'long_term_incentive', 'restricted_stock', 'director_fees',]].plot.box()
+# Check the abnormal observations has negative restricted_stock
+data_df[data_df['restricted_stock']<0]
 
-# Check the outlier in total payments 
-# Keep the oberservation since Lay_Kennethl is a person name
-data_df[data_df['total_payments']>100000000]
+### Remove the row with errors
+data_df.drop(['TOTAL','BELFER ROBERT','BHATNAGAR SANJAY',\
+              'THE TRAVEL AGENCY IN THE PARK', 'LOCKHART EUGENE E'], inplace=True)
 
+### Fill missing value with 0
+data_df=data_df.fillna(0)
 
 ### Task 3: Create new feature(s)
 
+print 'Creating new features...'
 data_df['to_poi_fraction']=data_df['from_this_person_to_poi']/data_df['from_messages']
 data_df['from_poi_fraction']=data_df['from_poi_to_this_person']/data_df['to_messages']
-
-### filled missing values with 0 
 data_df=data_df.fillna(0)
 
 ### update the features_list by adding two new features
-features_list = ['poi','salary', 'deferral_payments',
+features_list_original = ['poi','salary', 'deferral_payments',\
+                 'total_payments', 'loan_advances', 'bonus',\
+                 'restricted_stock_deferred', 'deferred_income',\
+                 'total_stock_value', 'expenses', 'exercised_stock_options',\
+                 'other', 'long_term_incentive', 'restricted_stock', 'director_fees',\
+                'to_messages', 'from_poi_to_this_person',\
+                 'from_messages', 'from_this_person_to_poi', 'shared_receipt_with_poi']
+
+features_list_new = ['poi','salary', 'deferral_payments',
                  'total_payments', 'loan_advances', 'bonus',
                  'restricted_stock_deferred', 'deferred_income',
                  'total_stock_value', 'expenses', 'exercised_stock_options',
@@ -100,19 +110,46 @@ features_list = ['poi','salary', 'deferral_payments',
                  'from_messages', 'from_this_person_to_poi', 'shared_receipt_with_poi',
                 'to_poi_fraction','from_poi_fraction'] 
 
+print 'Data formating for sk-learn...'
+data_dict_original=data_df.iloc[:, 0:20].to_dict(orient='index')
+data_dict_new=data_df.to_dict(orient='index')
 
 ### Store to my_dataset for easy export below.
-my_dataset = data_dict
+data_dict_original=data_df.iloc[:, 0:20].to_dict(orient='index')
+data_dict_new=data_df.to_dict(orient='index')
+
+
+my_dataset = data_dict_new
+features_list=features_list_new
+
+### Uncomment to see the analysis using original dataset without
+### adding new features
+
+#my_dataset = data_dict_original
+#features_list=features_list_original
 
 ### Extract features and labels from dataset for local testing
-from feature_format import featureFormat, targetFeatureSplit
 data = featureFormat(my_dataset, features_list, sort_keys = True)
 labels, features = targetFeatureSplit(data)
 
-### Split training dataset and test dataset
 from sklearn.cross_validation import train_test_split
 features_train, features_test, labels_train, labels_test = \
     train_test_split(features, labels, test_size=0.3, random_state=42)
+
+### Plot features scores
+from sklearn.feature_selection import SelectKBest
+from sklearn.feature_selection import f_classif
+selector=SelectKBest(f_classif, 'all')
+scores=selector.fit(features_train, labels_train).scores_
+
+scores_dict={}
+for i in range (0, len(scores)):
+    feature_name=features_list[i+1]
+    score=scores[i]
+    scores_dict[feature_name]=score
+scores_df=pd.DataFrame.from_dict(scores_dict, orient='index')
+scores_df.columns=['Score']
+scores_df.sort_values(['Score'], ascending=False).plot(kind='bar')
     
 ########################################################################    
 ### Task 4: Try a varity of classifiers                              ###
@@ -127,6 +164,7 @@ features_train, features_test, labels_train, labels_test = \
 from select_models import *
 
 ### Classifier_1 Gaussian Naive Bayes
+print 'Gaussian Naive Bayes Classifier...grid searching...'
 
 from sklearn.naive_bayes import GaussianNB
 from sklearn.feature_selection import SelectKBest
@@ -137,8 +175,8 @@ from sklearn.pipeline import Pipeline
 clf=NB_pipeline()
 Params=NB_Params() 
 grid_searcher = GridSearchCV(clf, param_grid=Params, cv=10, scoring='f1')
-
 grid_searcher.fit(features_train, labels_train)
+
 print 'The f1 score from Naive Bayes model is:', grid_searcher.best_score_
 result_df=pd.DataFrame.from_dict(grid_searcher.cv_results_)
 pd.DataFrame.from_dict(grid_searcher.best_params_, orient='index') 
@@ -151,6 +189,7 @@ NB_clf=Pipeline([
 
 
 ### Classifier_2 Decision Tree
+print 'Decision Tree Classifier...grid searching...'
 from sklearn import tree
 
 clf=Tree_pipeline()
@@ -164,14 +203,15 @@ pd.DataFrame.from_dict(grid_searcher.best_params_, orient='index')
 
 ### Final tree model
 Tree_clf = Pipeline([
-  ('selection', SelectKBest(f_classif, k=7)),
+  ('selection', SelectKBest(f_classif, k=9)),
   ('classification', tree.DecisionTreeClassifier(criterion='entropy',\
-                                                 min_samples_split=4,\
+                                                 min_samples_split=6,\
                                                  random_state=42,\
                                                  max_features='log2'))
 ])
 
 ### Classifier_3 SVC 
+print 'SVC Classifier...grid searching...'
 from sklearn.svm import SVC
 from sklearn import preprocessing
 
@@ -189,7 +229,7 @@ pd.DataFrame.from_dict(grid_searcher.best_params_, orient='index')
 SVC_clf=Pipeline([
     ('scaler', preprocessing.MinMaxScaler()),
     ('selection', SelectKBest(f_classif, k=7)),
-    ('classification', SVC(kernel='poly', gamma=100, C=10, random_state=42) )
+    ('classification', SVC(kernel='poly', gamma=100, C=0.1, random_state=42) )
 ])
 
 
@@ -206,6 +246,7 @@ SVC_clf=Pipeline([
 ### Returns Accuracy, Precision, Recall, and f1 scores
 ### Results may be different with the results from tester_classifiers since
 ### test_classifier using cross validation.
+print 'models comparing...'
 
 NB_clf.fit(features_train,labels_train)
 Tree_clf.fit(features_train,labels_train)
@@ -233,36 +274,18 @@ pd.DataFrame.from_dict(clf_scores, orient='index')
 ### that the version of poi_id.py that you submit can be run on its own and     ###
 ### generates the necessary .pkl files for validating your results.             ###
 ###################################################################################
+print 'Validataion...'
 
 clf=Tree_clf
 
-full_features_list = ['poi','salary', 'deferral_payments',
-                 'total_payments', 'loan_advances', 'bonus',
-                 'restricted_stock_deferred', 'deferred_income',
-                 'total_stock_value', 'expenses', 'exercised_stock_options',
-                 'other', 'long_term_incentive', 'restricted_stock', 'director_fees',
-                'to_messages', 'from_poi_to_this_person',
-                 'from_messages', 'from_this_person_to_poi', 'shared_receipt_with_poi',
-                'to_poi_fraction','from_poi_fraction'] 
-
 support=clf.named_steps['selection'].get_support()
-features_list=list(np.array(full_features_list[1:])[support])
+features_list=list(np.array(features_list[1:])[support])
 features_list=['poi']+features_list
 
 dump_classifier_and_data(clf, my_dataset, features_list)
 
 ### Plot features scores
-scores=clf.named_steps['selection'].scores_
-scores_dict={}
-for i in range (0, len(scores)):
-    feature_name=full_features_list[i+1]
-    score=scores[i]
-    scores_dict[feature_name]=score
-scores_df=pd.DataFrame.from_dict(scores_dict, orient='index')
-scores_df.columns=['Score']
-scores_df.sort_values(['Score'], ascending=False).plot(kind='bar')
-
-### Features importances
+print 'Features importances:'
 scores=clf.named_steps['classification'].feature_importances_
 scores_dict={}
 for i in range (0, len(scores)):
@@ -272,5 +295,6 @@ for i in range (0, len(scores)):
 scores_df=pd.DataFrame.from_dict(scores_dict, orient='index')
 scores_df.columns=['Score']
 scores_df.sort_values(['Score'], ascending=False).plot(kind='bar')
-
+print 'Final features list:'
+features_list
 
